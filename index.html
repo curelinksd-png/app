@@ -528,7 +528,7 @@
 
     <script>
         // ============ Configuration ============
-        const DEFAULT_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbz_RZRRekWraBSW_FnkT9jETH2XU-nHLWK9p5ZqOrHNqE7HdkBEL0LS0lwVJFS4Mpuc/exec';
+        const DEFAULT_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxNTSAijUF9_ABvNH91-hgMMwICimKDUA96_UGqw5mfcRG_I3lUI0eJkq4ByNB3IeM8/exec';
         // Force update: Clear old URL and use new one
         localStorage.setItem('webAppUrl', DEFAULT_WEB_APP_URL);
         let WEB_APP_URL = DEFAULT_WEB_APP_URL;
@@ -537,12 +537,10 @@
         const defaultUsers = [
             { id: 1, username: 'admin', password: 'admin123', fullName: 'المدير', role: 'admin' },
             { id: 2, username: 'accountant', password: 'acc123', fullName: 'المحاسب', role: 'accountant' },
-            { id: 3, username: 'وليد', password: '123456', fullName: 'وليد عبدالوهاب', role: 'accountant' }
+            { id: 3, username: 'وليد', password: '123456789', fullName: 'وليد عبدالوهاب', role: 'accountant' }
         ];
-        // Initialize users from localStorage or defaults (cloud data loaded later)
-        if (!localStorage.getItem('users')) {
-            localStorage.setItem('users', JSON.stringify(defaultUsers));
-        }
+        // Force sync users with correct passwords
+        localStorage.setItem('users', JSON.stringify(defaultUsers));
 
         const defaultServices = [
             { id: 1, name: 'طباعة أبيض وأسود', price: 5, icon: 'fa-print', hasDiscount: true, discountQty: 100, discountPercent: 10, hasCommission: true, commissionPercent: 5 },
