@@ -179,7 +179,17 @@
                     <div class="stat-card admin-only">
                         <i class="fas fa-money-bill-wave stat-icon"></i>
                         <div class="stat-value" id="todaySales">0</div>
-                        <div class="stat-label">مبيعات اليوم (جنيه)</div>
+                        <div class="stat-label">إجمالي مبيعات اليوم (جنيه)</div>
+                    </div>
+                    <div class="stat-card admin-only" style="border-color: rgba(255,170,0,0.3);">
+                        <i class="fas fa-tags stat-icon" style="color: #ffaa00;"></i>
+                        <div class="stat-value" id="todayDiscount" style="color: #ffaa00;">0</div>
+                        <div class="stat-label">خصومات اليوم (جنيه)</div>
+                    </div>
+                    <div class="stat-card admin-only" style="border-color: rgba(0,255,136,0.3);">
+                        <i class="fas fa-hand-holding-usd stat-icon" style="color: #00ff88;"></i>
+                        <div class="stat-value" id="todayNetSales" style="color: #00ff88;">0</div>
+                        <div class="stat-label">صافي مبيعات اليوم (جنيه)</div>
                     </div>
                     <div class="stat-card">
                         <i class="fas fa-receipt stat-icon"></i>
@@ -201,7 +211,7 @@
                     <h3 class="card-title"><i class="fas fa-clock"></i> آخر الطلبات</h3>
                     <div class="table-container">
                         <table>
-                            <thead><tr><th>رقم الطلب</th><th>العميل</th><th>الخدمة</th><th class="admin-only">المبلغ</th><th>التاريخ</th><th>الحالة</th></tr></thead>
+                            <thead><tr><th>رقم الطلب</th><th>العميل</th><th>الخدمة</th><th class="admin-only">المبلغ</th><th>التاريخ</th><th>الحالة</th><th class="admin-only">إجراء</th></tr></thead>
                             <tbody id="recentOrdersTable"></tbody>
                         </table>
                     </div>
@@ -532,7 +542,7 @@
 
     <script>
         // ============ Configuration ============
-        const DEFAULT_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxNTSAijUF9_ABvNH91-hgMMwICimKDUA96_UGqw5mfcRG_I3lUI0eJkq4ByNB3IeM8/exec';
+        const DEFAULT_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwD0qWytxCzKJ6W_4sqCnL6nAexo58_BGTx_3x_-GSyteSmf-zeu2Si05XFp_h1wlr6/exec';
         // Force update: Clear old URL and use new one
         localStorage.setItem('webAppUrl', DEFAULT_WEB_APP_URL);
         let WEB_APP_URL = DEFAULT_WEB_APP_URL;
@@ -559,6 +569,11 @@
         ];
 
         // Calculate employee commission from orders - grouped by employee
+        // دالة تنسيق الأرقام بفواصل الآلاف
+        function formatNumber(num) {
+            return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
         function calculateCommission(orders) {
             const employeeCommissions = {};
             let totalCommission = 0;
@@ -568,11 +583,19 @@
                 order.items.forEach(item => {
                     const service = services.find(s => s.name === item.name);
                     if (service && service.hasCommission && service.commissionPercent > 0) {
-                        let itemTotal = item.price * item.quantity;
-                        if (item.hasDiscount && item.quantity >= item.discountQty) {
-                            itemTotal -= itemTotal * (item.discountPercent / 100);
+                        // حساب الصافي بعد الخصم
+                        let itemGross = item.price * item.quantity;
+                        let itemNet = itemGross;
+                        // خصم يدوي
+                        if (item.customPrice !== undefined && item.customPrice < item.price) {
+                            itemNet = item.customPrice * item.quantity;
                         }
-                        const commission = itemTotal * (service.commissionPercent / 100);
+                        // خصم الكمية
+                        else if (item.hasDiscount && item.quantity >= item.discountQty) {
+                            itemNet = itemGross - (itemGross * (item.discountPercent / 100));
+                        }
+                        // حساب العمولة من الصافي
+                        const commission = itemNet * (service.commissionPercent / 100);
                         if (!employeeCommissions[empName]) {
                             employeeCommissions[empName] = { name: empName, services: {}, totalCommission: 0 };
                         }
@@ -580,7 +603,7 @@
                             employeeCommissions[empName].services[item.name] = { name: item.name, count: 0, revenue: 0, commission: 0, commissionPercent: service.commissionPercent };
                         }
                         employeeCommissions[empName].services[item.name].count += item.quantity;
-                        employeeCommissions[empName].services[item.name].revenue += itemTotal;
+                        employeeCommissions[empName].services[item.name].revenue += itemNet;
                         employeeCommissions[empName].services[item.name].commission += commission;
                         employeeCommissions[empName].totalCommission += commission;
                         totalCommission += commission;
@@ -832,6 +855,7 @@
             else if (sectionId === 'customers') loadCustomers();
             else if (sectionId === 'inventory') loadInventory();
             else if (sectionId === 'expenses') loadExpenses();
+            else if (sectionId === 'reports') loadDailyReport();
             else if (sectionId === 'newOrder') { renderServices(); loadCustomersDropdown(); }
         }
 
@@ -841,17 +865,54 @@
         async function loadDashboard() {
             const data = await apiGet('getDashboard');
             if (data) {
-                if (isAdmin()) { document.getElementById('todaySales').textContent = (data.todaySales || 0).toFixed(2); document.getElementById('monthSales').textContent = (data.monthSales || 0).toFixed(2); }
+                // حساب الخصومات والصافي من الطلبات
+                const mockOrders = JSON.parse(localStorage.getItem('mockOrders') || '[]');
+                const today = new Date().toISOString().split('T')[0];
+                const todayOrders = mockOrders.filter(o => o.date && o.date.startsWith(today));
+
+                let todayGross = 0, todayDiscount = 0;
+                todayOrders.forEach(order => {
+                    if (!order.items) return;
+                    order.items.forEach(item => {
+                        const itemGross = item.price * item.quantity;
+                        todayGross += itemGross;
+                        if (item.customPrice !== undefined && item.customPrice < item.price) {
+                            todayDiscount += (item.price - item.customPrice) * item.quantity;
+                        } else if (item.hasDiscount && item.quantity >= item.discountQty) {
+                            todayDiscount += itemGross * (item.discountPercent / 100);
+                        }
+                    });
+                    if (order.discountAmount) todayDiscount += order.discountAmount;
+                });
+                const todayNet = todayGross - todayDiscount;
+
+                if (isAdmin()) {
+                    document.getElementById('todaySales').textContent = formatNumber(todayGross);
+                    document.getElementById('todayDiscount').textContent = formatNumber(todayDiscount);
+                    document.getElementById('todayNetSales').textContent = formatNumber(todayNet);
+                    document.getElementById('monthSales').textContent = formatNumber(data.monthSales || 0);
+                }
                 document.getElementById('todayOrders').textContent = data.todayOrders || 0;
-                document.getElementById('todayExpenses').textContent = (data.todayExpenses || 0).toFixed(2);
+                document.getElementById('todayExpenses').textContent = formatNumber(data.todayExpenses || 0);
                 const tbody = document.getElementById('recentOrdersTable');
                 if (data.recentOrders && data.recentOrders.length > 0) {
-                    tbody.innerHTML = data.recentOrders.map(order => `<tr><td>#${order.id}</td><td>${order.customerName}</td><td>${order.services}</td>${isAdmin() ? `<td>${order.total.toFixed(2)} جنيه</td>` : ''}<td>${formatDate(order.date)}</td><td><span style="color: ${order.status === 'مكتمل' ? '#00ff88' : '#ffaa00'}">${order.status}</span></td></tr>`).join('');
-                } else { tbody.innerHTML = `<tr><td colspan="${isAdmin() ? 6 : 5}" style="text-align: center;">لا توجد طلبات</td></tr>`; }
+                    tbody.innerHTML = data.recentOrders.map(order => `<tr><td>#${order.id}</td><td>${order.customerName}</td><td>${order.services}</td>${isAdmin() ? `<td>${formatNumber(order.total)} جنيه</td>` : ''}<td>${formatDate(order.date)}</td><td><span style="color: ${order.status === 'مكتمل' ? '#00ff88' : '#ffaa00'}">${order.status}</span></td>${isAdmin() ? `<td><button class="btn btn-danger" style="padding: 5px 10px;" onclick="deleteDashboardOrder(${order.id})"><i class="fas fa-trash"></i></button></td>` : ''}</tr>`).join('');
+                } else { tbody.innerHTML = `<tr><td colspan="${isAdmin() ? 7 : 5}" style="text-align: center;">لا توجد طلبات</td></tr>`; }
                 const alertsDiv = document.getElementById('inventoryAlerts');
                 if (data.lowInventory && data.lowInventory.length > 0) { alertsDiv.innerHTML = data.lowInventory.map(item => `<div class="alert alert-error"><i class="fas fa-exclamation-triangle"></i><span>${item.name}: الكمية المتبقية ${item.quantity} ${item.unit}</span></div>`).join(''); }
                 else { alertsDiv.innerHTML = '<div class="alert alert-success"><i class="fas fa-check"></i> المخزون في حالة جيدة</div>'; }
             }
+        }
+
+        // حذف طلب من الداشبورد
+        function deleteDashboardOrder(orderId) {
+            if (!confirm('هل أنت متأكد من حذف هذا الطلب؟')) return;
+            let mockOrders = JSON.parse(localStorage.getItem('mockOrders') || '[]');
+            mockOrders = mockOrders.filter(o => o.id !== orderId);
+            localStorage.setItem('mockOrders', JSON.stringify(mockOrders));
+            apiCall('deleteOrder', { id: orderId });
+            showAlert('تم حذف الطلب بنجاح', 'success');
+            loadDashboard();
         }
 
         // ============ Expenses ============
@@ -1137,23 +1198,41 @@
             const mockExpenses = JSON.parse(localStorage.getItem('mockExpenses') || '[]');
             const dayOrders = mockOrders.filter(o => o.date.startsWith(date));
             const dayExpenses = mockExpenses.filter(e => e.date.startsWith(date));
-            const totalSales = dayOrders.reduce((sum, o) => sum + o.total, 0);
+
+            // حساب الإيرادات والخصومات
+            let grossSales = 0;
+            let totalDiscount = 0;
+            dayOrders.forEach(order => {
+                order.items.forEach(item => {
+                    const itemGross = item.price * item.quantity;
+                    grossSales += itemGross;
+                    if (item.customPrice !== undefined && item.customPrice < item.price) {
+                        totalDiscount += (item.price - item.customPrice) * item.quantity;
+                    } else if (item.hasDiscount && item.quantity >= item.discountQty) {
+                        totalDiscount += itemGross * (item.discountPercent / 100);
+                    }
+                });
+                if (order.discountAmount) totalDiscount += order.discountAmount;
+            });
+            const netSales = grossSales - totalDiscount;
+
             const cashSales = dayOrders.filter(o => !o.paymentMethod || o.paymentMethod === 'نقدي').reduce((sum, o) => sum + o.total, 0);
             const bankSales = dayOrders.filter(o => o.paymentMethod === 'بنكي').reduce((sum, o) => sum + o.total, 0);
             const totalExpenses = dayExpenses.reduce((sum, e) => sum + e.amount, 0);
-            const netProfit = totalSales - totalExpenses;
+            const netProfit = netSales - totalExpenses;
             const profitColor = netProfit >= 0 ? '#00ff88' : '#ff4757';
             const profitBorderColor = netProfit >= 0 ? 'rgba(0,255,136,0.3)' : 'rgba(255,71,87,0.3)';
-            // Calculate employee commission
             const commissionData = calculateCommission(dayOrders);
             document.getElementById('dailyReportContent').innerHTML = `
                 <div class="stats-grid">
-                    <div class="stat-card"><i class="fas fa-money-bill-wave stat-icon"></i><div class="stat-value">${totalSales.toFixed(2)}</div><div class="stat-label">المبيعات (جنيه)</div><small style="color: #00ff88;">نقدي: ${cashSales.toFixed(2)}</small><br><small style="color: #00d4ff;">بنكي: ${bankSales.toFixed(2)}</small></div>
+                    <div class="stat-card"><i class="fas fa-money-bill-wave stat-icon"></i><div class="stat-value">${formatNumber(grossSales)}</div><div class="stat-label">إجمالي المبيعات (جنيه)</div><small style="color: #00ff88;">نقدي: ${formatNumber(cashSales)}</small><br><small style="color: #00d4ff;">بنكي: ${formatNumber(bankSales)}</small></div>
+                    <div class="stat-card" style="border-color: rgba(255,170,0,0.3);"><i class="fas fa-tags stat-icon" style="color: #ffaa00;"></i><div class="stat-value" style="color: #ffaa00;">${formatNumber(totalDiscount)}</div><div class="stat-label">إجمالي الخصومات (جنيه)</div></div>
+                    <div class="stat-card" style="border-color: rgba(0,255,136,0.3);"><i class="fas fa-hand-holding-usd stat-icon" style="color: #00ff88;"></i><div class="stat-value" style="color: #00ff88;">${formatNumber(netSales)}</div><div class="stat-label">صافي المبيعات (جنيه)</div></div>
                     <div class="stat-card"><i class="fas fa-receipt stat-icon"></i><div class="stat-value">${dayOrders.length}</div><div class="stat-label">عدد الطلبات</div></div>
-                    <div class="stat-card expense-card"><i class="fas fa-wallet stat-icon" style="color: #ffaa00;"></i><div class="stat-value" style="color: #ffaa00;">${totalExpenses.toFixed(2)}</div><div class="stat-label">المصروفات (جنيه)</div></div>
-                    <div class="stat-card" style="border-color: ${profitBorderColor};"><i class="fas fa-chart-line stat-icon" style="color: ${profitColor};"></i><div class="stat-value" style="color: ${profitColor};">${netProfit.toFixed(2)}</div><div class="stat-label">صافي الربح (جنيه)</div></div>
+                    <div class="stat-card expense-card"><i class="fas fa-wallet stat-icon" style="color: #ffaa00;"></i><div class="stat-value" style="color: #ffaa00;">${formatNumber(totalExpenses)}</div><div class="stat-label">المصروفات (جنيه)</div></div>
+                    <div class="stat-card" style="border-color: ${profitBorderColor};"><i class="fas fa-chart-line stat-icon" style="color: ${profitColor};"></i><div class="stat-value" style="color: ${profitColor};">${formatNumber(netProfit)}</div><div class="stat-label">صافي الربح (جنيه)</div></div>
                 </div>
-                ${commissionData.total > 0 ? `<div class="card" style="margin-top: 20px; background: rgba(255,170,0,0.1); border: 1px solid rgba(255,170,0,0.3);"><h4 style="color: #ffaa00; margin-bottom: 15px;"><i class="fas fa-user-tie"></i> عمولات الموظفين</h4>${commissionData.employees.map(emp => `<div style="margin-bottom: 20px; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 10px;"><h5 style="color: #00d4ff; margin-bottom: 10px;"><i class="fas fa-user"></i> ${emp.name}</h5><div class="table-container"><table><thead><tr><th>الخدمة</th><th>الكمية</th><th>الإيرادات</th><th>نسبة العمولة</th><th>قيمة العمولة</th></tr></thead><tbody>${emp.services.map(s => `<tr><td>${s.name}</td><td>${s.count}</td><td>${s.revenue.toFixed(2)} جنيه</td><td>${s.commissionPercent}%</td><td style="color: #ffaa00;">${s.commission.toFixed(2)} جنيه</td></tr>`).join('')}<tr style="background: rgba(255,170,0,0.2);"><td colspan="4"><strong>عمولة ${emp.name}:</strong></td><td style="color: #ffaa00;"><strong>${emp.totalCommission.toFixed(2)} جنيه</strong></td></tr></tbody></table></div></div>`).join('')}<div style="padding: 15px; background: rgba(255,170,0,0.3); border-radius: 10px; text-align: center;"><strong>إجمالي جميع العمولات: <span style="color: #ffaa00; font-size: 1.3rem;">${commissionData.total.toFixed(2)} جنيه</span></strong></div></div>` : ''}`;
+                ${commissionData.total > 0 ? `<div class="card" style="margin-top: 20px; background: rgba(255,170,0,0.1); border: 1px solid rgba(255,170,0,0.3);"><h4 style="color: #ffaa00; margin-bottom: 15px;"><i class="fas fa-user-tie"></i> عمولات الموظفين</h4>${commissionData.employees.map(emp => `<div style="margin-bottom: 20px; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 10px;"><h5 style="color: #00d4ff; margin-bottom: 10px;"><i class="fas fa-user"></i> ${emp.name}</h5><div class="table-container"><table><thead><tr><th>الخدمة</th><th>الكمية</th><th>صافي الإيرادات</th><th>نسبة العمولة</th><th>قيمة العمولة</th></tr></thead><tbody>${emp.services.map(s => `<tr><td>${s.name}</td><td>${s.count}</td><td>${formatNumber(s.revenue)} جنيه</td><td>${s.commissionPercent}%</td><td style="color: #ffaa00;">${formatNumber(s.commission)} جنيه</td></tr>`).join('')}<tr style="background: rgba(255,170,0,0.2);"><td colspan="4"><strong>عمولة ${emp.name}:</strong></td><td style="color: #ffaa00;"><strong>${formatNumber(emp.totalCommission)} جنيه</strong></td></tr></tbody></table></div></div>`).join('')}<div style="padding: 15px; background: rgba(255,170,0,0.3); border-radius: 10px; text-align: center;"><strong>إجمالي جميع العمولات: <span style="color: #ffaa00; font-size: 1.3rem;">${formatNumber(commissionData.total)} جنيه</span></strong></div></div>` : ''}`;
         }
 
         async function loadMonthlyReport() {
@@ -1161,33 +1240,256 @@
             const mockExpenses = JSON.parse(localStorage.getItem('mockExpenses') || '[]');
             const monthOrders = mockOrders.filter(o => { const d = new Date(o.date); return d.getMonth() === new Date().getMonth() && d.getFullYear() === new Date().getFullYear(); });
             const monthExpenses = mockExpenses.filter(e => { const d = new Date(e.date); return d.getMonth() === new Date().getMonth() && d.getFullYear() === new Date().getFullYear(); });
-            const totalSales = monthOrders.reduce((sum, o) => sum + o.total, 0);
-            const cashSales = monthOrders.filter(o => !o.paymentMethod || o.paymentMethod === 'نقدي').reduce((sum, o) => sum + o.total, 0);
-            const bankSales = monthOrders.filter(o => o.paymentMethod === 'بنكي').reduce((sum, o) => sum + o.total, 0);
+
+            // حساب الإيرادات والخصومات
+            let grossSales = 0;
+            let totalDiscount = 0;
+            monthOrders.forEach(order => {
+                order.items.forEach(item => {
+                    const itemGross = item.price * item.quantity;
+                    grossSales += itemGross;
+                    // حساب الخصم
+                    if (item.customPrice !== undefined && item.customPrice < item.price) {
+                        totalDiscount += (item.price - item.customPrice) * item.quantity;
+                    } else if (item.hasDiscount && item.quantity >= item.discountQty) {
+                        totalDiscount += itemGross * (item.discountPercent / 100);
+                    }
+                });
+                // خصم إضافي على الطلب
+                if (order.discountAmount) totalDiscount += order.discountAmount;
+            });
+            const netSales = grossSales - totalDiscount;
+
+            const cashOrders = monthOrders.filter(o => !o.paymentMethod || o.paymentMethod === 'نقدي');
+            const bankOrders = monthOrders.filter(o => o.paymentMethod === 'بنكي');
+            const cashSales = cashOrders.reduce((sum, o) => sum + o.total, 0);
+            const bankSales = bankOrders.reduce((sum, o) => sum + o.total, 0);
             const dailyExpensesTotal = monthExpenses.reduce((sum, e) => sum + e.amount, 0);
             const fixedExpensesTotal = fixedExpenses.reduce((sum, e) => sum + e.amount, 0);
             const totalExpenses = dailyExpensesTotal + fixedExpensesTotal;
-            const netProfit = totalSales - totalExpenses;
+            const netProfit = netSales - totalExpenses;
             const profitColor = netProfit >= 0 ? '#00ff88' : '#ff4757';
             const profitBorderColor = netProfit >= 0 ? 'rgba(0,255,136,0.3)' : 'rgba(255,71,87,0.3)';
             const commissionData = calculateCommission(monthOrders);
+
+            // تحميل تعديلات العمولات المحفوظة
+            const commissionAdjustments = JSON.parse(localStorage.getItem('commissionAdjustments') || '{}');
+
             document.getElementById('monthlyReportContent').innerHTML = `
                 <div class="stats-grid">
-                    <div class="stat-card"><i class="fas fa-money-bill-wave stat-icon"></i><div class="stat-value">${totalSales.toFixed(2)}</div><div class="stat-label">المبيعات (جنيه)</div><small style="color: #00ff88;">نقدي: ${cashSales.toFixed(2)}</small><br><small style="color: #00d4ff;">بنكي: ${bankSales.toFixed(2)}</small></div>
+                    <div class="stat-card"><i class="fas fa-money-bill-wave stat-icon"></i><div class="stat-value">${formatNumber(grossSales)}</div><div class="stat-label">إجمالي المبيعات (جنيه)</div><small style="color: #00ff88;">نقدي: ${formatNumber(cashSales)}</small><br><small style="color: #00d4ff;">بنكي: ${formatNumber(bankSales)}</small></div>
+                    <div class="stat-card" style="border-color: rgba(255,170,0,0.3);"><i class="fas fa-tags stat-icon" style="color: #ffaa00;"></i><div class="stat-value" style="color: #ffaa00;">${formatNumber(totalDiscount)}</div><div class="stat-label">إجمالي الخصومات (جنيه)</div></div>
+                    <div class="stat-card" style="border-color: rgba(0,255,136,0.3);"><i class="fas fa-hand-holding-usd stat-icon" style="color: #00ff88;"></i><div class="stat-value" style="color: #00ff88;">${formatNumber(netSales)}</div><div class="stat-label">صافي المبيعات (جنيه)</div></div>
                     <div class="stat-card"><i class="fas fa-receipt stat-icon"></i><div class="stat-value">${monthOrders.length}</div><div class="stat-label">عدد الطلبات</div></div>
-                    <div class="stat-card expense-card"><i class="fas fa-wallet stat-icon" style="color: #ffaa00;"></i><div class="stat-value" style="color: #ffaa00;">${totalExpenses.toFixed(2)}</div><div class="stat-label">إجمالي المصروفات</div><small style="color: #ffaa00;">يومية: ${dailyExpensesTotal.toFixed(2)}</small><br><small style="color: #ff6600;">ثابتة: ${fixedExpensesTotal.toFixed(2)}</small></div>
-                    <div class="stat-card" style="border-color: ${profitBorderColor};"><i class="fas fa-chart-line stat-icon" style="color: ${profitColor};"></i><div class="stat-value" style="color: ${profitColor};">${netProfit.toFixed(2)}</div><div class="stat-label">صافي الربح (جنيه)</div></div>
+                    <div class="stat-card expense-card"><i class="fas fa-wallet stat-icon" style="color: #ffaa00;"></i><div class="stat-value" style="color: #ffaa00;">${formatNumber(totalExpenses)}</div><div class="stat-label">إجمالي المصروفات</div><small style="color: #ffaa00;">يومية: ${formatNumber(dailyExpensesTotal)}</small><br><small style="color: #ff6600;">ثابتة: ${formatNumber(fixedExpensesTotal)}</small></div>
+                    <div class="stat-card" style="border-color: ${profitBorderColor};"><i class="fas fa-chart-line stat-icon" style="color: ${profitColor};"></i><div class="stat-value" style="color: ${profitColor};">${formatNumber(netProfit)}</div><div class="stat-label">صافي الربح (جنيه)</div></div>
                 </div>
-                ${fixedExpenses.length > 0 ? `<div class="card" style="margin-top: 20px; background: rgba(255,102,0,0.1); border: 1px solid rgba(255,102,0,0.3);"><h4 style="color: #ff6600; margin-bottom: 15px;"><i class="fas fa-calendar-check"></i> المصروفات الثابتة الشهرية</h4><div class="table-container"><table><thead><tr><th>المصروف</th><th>المبلغ</th></tr></thead><tbody>${fixedExpenses.map(exp => `<tr><td><i class="fas fa-money-check-alt" style="color: #ff6600; margin-left: 10px;"></i>${exp.name}</td><td style="color: #ff6600;">${exp.amount.toFixed(2)} جنيه</td></tr>`).join('')}<tr style="background: rgba(255,102,0,0.2);"><td><strong>إجمالي المصروفات الثابتة</strong></td><td style="color: #ff6600;"><strong>${fixedExpensesTotal.toFixed(2)} جنيه</strong></td></tr></tbody></table></div></div>` : ''}
-                ${commissionData.total > 0 ? `<div class="card" style="margin-top: 20px; background: rgba(255,170,0,0.1); border: 1px solid rgba(255,170,0,0.3);"><h4 style="color: #ffaa00; margin-bottom: 15px;"><i class="fas fa-user-tie"></i> عمولات الموظفين</h4>${commissionData.employees.map(emp => `<div style="margin-bottom: 20px; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 10px;"><h5 style="color: #00d4ff; margin-bottom: 10px;"><i class="fas fa-user"></i> ${emp.name}</h5><div class="table-container"><table><thead><tr><th>الخدمة</th><th>الكمية</th><th>الإيرادات</th><th>نسبة العمولة</th><th>قيمة العمولة</th></tr></thead><tbody>${emp.services.map(s => `<tr><td>${s.name}</td><td>${s.count}</td><td>${s.revenue.toFixed(2)} جنيه</td><td>${s.commissionPercent}%</td><td style="color: #ffaa00;">${s.commission.toFixed(2)} جنيه</td></tr>`).join('')}<tr style="background: rgba(255,170,0,0.2);"><td colspan="4"><strong>عمولة ${emp.name}:</strong></td><td style="color: #ffaa00;"><strong>${emp.totalCommission.toFixed(2)} جنيه</strong></td></tr></tbody></table></div></div>`).join('')}<div style="padding: 15px; background: rgba(255,170,0,0.3); border-radius: 10px; text-align: center;"><strong>إجمالي جميع العمولات: <span style="color: #ffaa00; font-size: 1.3rem;">${commissionData.total.toFixed(2)} جنيه</span></strong></div></div>` : ''}`;
+                ${fixedExpenses.length > 0 ? `<div class="card" style="margin-top: 20px; background: rgba(255,102,0,0.1); border: 1px solid rgba(255,102,0,0.3);"><h4 style="color: #ff6600; margin-bottom: 15px;"><i class="fas fa-calendar-check"></i> المصروفات الثابتة الشهرية</h4><div class="table-container"><table><thead><tr><th>المصروف</th><th>المبلغ</th></tr></thead><tbody>${fixedExpenses.map(exp => `<tr><td><i class="fas fa-money-check-alt" style="color: #ff6600; margin-left: 10px;"></i>${exp.name}</td><td style="color: #ff6600;">${formatNumber(exp.amount)} جنيه</td></tr>`).join('')}<tr style="background: rgba(255,102,0,0.2);"><td><strong>إجمالي المصروفات الثابتة</strong></td><td style="color: #ff6600;"><strong>${formatNumber(fixedExpensesTotal)} جنيه</strong></td></tr></tbody></table></div></div>` : ''}
+
+                <!-- قسم عمولات الموظفين -->
+                <div class="card" style="margin-top: 20px; background: rgba(255,170,0,0.1); border: 1px solid rgba(255,170,0,0.3);">
+                    <h4 style="color: #ffaa00; margin-bottom: 15px;"><i class="fas fa-user-tie"></i> عمولات الموظفين</h4>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>الموظف</th>
+                                    <th>العمولة المحسوبة</th>
+                                    <th>العمولة النهائية</th>
+                                    ${isAdmin() ? '<th>إجراء</th>' : ''}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${commissionData.employees.length > 0 ? commissionData.employees.map(emp => {
+                                    const adjustedAmount = commissionAdjustments[emp.name] !== undefined ? commissionAdjustments[emp.name] : emp.totalCommission;
+                                    return `
+                                        <tr>
+                                            <td><i class="fas fa-user" style="color: #00d4ff; margin-left: 8px;"></i>${emp.name}</td>
+                                            <td>${formatNumber(emp.totalCommission)} جنيه</td>
+                                            <td>
+                                                ${isAdmin() ?
+                                                    `<input type="number" id="commission-${emp.name}" value="${adjustedAmount.toFixed(2)}"
+                                                        style="width: 120px; padding: 8px; border: 2px solid #ffaa00; border-radius: 8px; background: rgba(0,0,0,0.3); color: #ffaa00; font-weight: bold; text-align: center;"
+                                                        step="0.5" min="0">`
+                                                    : `<span style="color: #ffaa00; font-weight: bold;">${formatNumber(adjustedAmount)} جنيه</span>`
+                                                }
+                                            </td>
+                                            ${isAdmin() ? `<td><button class="btn btn-primary" style="padding: 8px 15px;" onclick="saveCommissionAdjustment('${emp.name}')"><i class="fas fa-save"></i> حفظ</button></td>` : ''}
+                                        </tr>
+                                    `;
+                                }).join('') : '<tr><td colspan="4" style="text-align: center;">لا توجد عمولات</td></tr>'}
+                            </tbody>
+                            <tfoot style="background: rgba(255,170,0,0.3);">
+                                <tr>
+                                    <td><strong>الإجمالي</strong></td>
+                                    <td><strong>${formatNumber(commissionData.total)} جنيه</strong></td>
+                                    <td colspan="${isAdmin() ? '2' : '1'}"><strong style="color: #ffaa00; font-size: 1.2rem;">${formatNumber(Object.keys(commissionAdjustments).length > 0 ?
+                                        commissionData.employees.reduce((sum, emp) => sum + (commissionAdjustments[emp.name] !== undefined ? commissionAdjustments[emp.name] : emp.totalCommission), 0)
+                                        : commissionData.total)} جنيه</strong></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                    ${isAdmin() ? `<div style="margin-top: 15px; padding: 10px; background: rgba(0,212,255,0.1); border-radius: 8px; text-align: center;">
+                        <small style="color: #00d4ff;"><i class="fas fa-info-circle"></i> يمكنك تعديل قيمة العمولة النهائية لكل موظف ثم الضغط على حفظ</small>
+                    </div>` : ''}
+                </div>`;
+        }
+
+        // حفظ تعديل العمولة
+        function saveCommissionAdjustment(employeeName) {
+            const input = document.getElementById(`commission-${employeeName}`);
+            if (!input) return;
+            const newAmount = parseFloat(input.value) || 0;
+            const adjustments = JSON.parse(localStorage.getItem('commissionAdjustments') || '{}');
+            adjustments[employeeName] = newAmount;
+            localStorage.setItem('commissionAdjustments', JSON.stringify(adjustments));
+            showAlert(`تم حفظ عمولة ${employeeName}: ${newAmount.toFixed(2)} جنيه`, 'success');
+            loadMonthlyReport();
         }
 
         async function loadServicesReport() {
             const mockOrders = JSON.parse(localStorage.getItem('mockOrders') || '[]');
             const serviceStats = {};
-            mockOrders.forEach(order => { order.items.forEach(item => { if (!serviceStats[item.name]) serviceStats[item.name] = { count: 0, revenue: 0 }; serviceStats[item.name].count += item.quantity; let itemTotal = item.price * item.quantity; if (item.hasDiscount && item.quantity >= item.discountQty) itemTotal -= itemTotal * (item.discountPercent / 100); serviceStats[item.name].revenue += itemTotal; }); });
-            const sortedServices = Object.entries(serviceStats).sort((a, b) => b[1].revenue - a[1].revenue);
-            document.getElementById('servicesReportContent').innerHTML = `<div class="table-container"><table><thead><tr><th>الخدمة</th><th>عدد المبيعات</th><th>الإيرادات</th></tr></thead><tbody>${sortedServices.map(([name, stats]) => `<tr><td>${name}</td><td>${stats.count}</td><td>${stats.revenue.toFixed(2)} جنيه</td></tr>`).join('') || '<tr><td colspan="3" style="text-align: center;">لا توجد بيانات</td></tr>'}</tbody></table></div>`;
+            mockOrders.forEach(order => {
+                order.items.forEach(item => {
+                    if (!serviceStats[item.name]) serviceStats[item.name] = { count: 0, grossRevenue: 0, discount: 0, netRevenue: 0 };
+                    serviceStats[item.name].count += item.quantity;
+                    const grossTotal = item.price * item.quantity;
+                    serviceStats[item.name].grossRevenue += grossTotal;
+                    let discountAmount = 0;
+                    if (item.customPrice !== undefined && item.customPrice < item.price) {
+                        discountAmount = (item.price - item.customPrice) * item.quantity;
+                    } else if (item.hasDiscount && item.quantity >= item.discountQty) {
+                        discountAmount = grossTotal * (item.discountPercent / 100);
+                    }
+                    serviceStats[item.name].discount += discountAmount;
+                    serviceStats[item.name].netRevenue += (grossTotal - discountAmount);
+                });
+            });
+            const sortedServices = Object.entries(serviceStats).sort((a, b) => b[1].netRevenue - a[1].netRevenue);
+            const totalGross = sortedServices.reduce((sum, [_, s]) => sum + s.grossRevenue, 0);
+            const totalDiscount = sortedServices.reduce((sum, [_, s]) => sum + s.discount, 0);
+            const totalNet = sortedServices.reduce((sum, [_, s]) => sum + s.netRevenue, 0);
+            document.getElementById('servicesReportContent').innerHTML = `
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>الخدمة</th>
+                                <th>عدد المبيعات</th>
+                                <th>الإيرادات</th>
+                                <th style="color: #ffaa00;">قيمة الخصم</th>
+                                <th style="color: #00ff88;">الصافي</th>
+                                ${isAdmin() ? '<th>إجراء</th>' : ''}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${sortedServices.map(([name, stats]) => `
+                                <tr>
+                                    <td>${name}</td>
+                                    <td>${stats.count}</td>
+                                    <td>${formatNumber(stats.grossRevenue)} جنيه</td>
+                                    <td style="color: #ffaa00;">${formatNumber(stats.discount)} جنيه</td>
+                                    <td style="color: #00ff88; font-weight: bold;">${formatNumber(stats.netRevenue)} جنيه</td>
+                                    ${isAdmin() ? `<td><button class="btn btn-danger" style="padding: 5px 10px;" onclick="showDeleteServiceRevenueModal('${name}')"><i class="fas fa-trash"></i> حذف</button></td>` : ''}
+                                </tr>
+                            `).join('') || `<tr><td colspan="${isAdmin() ? 6 : 5}" style="text-align: center;">لا توجد بيانات</td></tr>`}
+                        </tbody>
+                        <tfoot style="background: rgba(0,212,255,0.2); font-weight: bold;">
+                            <tr>
+                                <td>الإجمالي</td>
+                                <td>-</td>
+                                <td>${formatNumber(totalGross)} جنيه</td>
+                                <td style="color: #ffaa00;">${formatNumber(totalDiscount)} جنيه</td>
+                                <td style="color: #00ff88;">${formatNumber(totalNet)} جنيه</td>
+                                ${isAdmin() ? '<td></td>' : ''}
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>`;
+        }
+
+        // حذف إيرادات خدمة معينة
+        function showDeleteServiceRevenueModal(serviceName) {
+            const mockOrders = JSON.parse(localStorage.getItem('mockOrders') || '[]');
+            // البحث عن الطلبات التي تحتوي على هذه الخدمة
+            const ordersWithService = mockOrders.filter(o => o.items && o.items.some(i => i.name === serviceName));
+
+            if (ordersWithService.length === 0) {
+                showAlert('لا توجد طلبات تحتوي على هذه الخدمة', 'error');
+                return;
+            }
+
+            let html = `
+                <div class="modal active" id="deleteServiceRevenueModal" style="z-index: 2000;">
+                    <div class="modal-content" style="max-width: 700px; max-height: 80vh; overflow-y: auto;">
+                        <h3 style="margin-bottom: 15px; color: #ff4757;"><i class="fas fa-trash"></i> حذف إيرادات: ${serviceName}</h3>
+                        <p style="margin-bottom: 15px;">اختر الطلبات التي تريد حذفها (تحتوي على ${serviceName}):</p>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th><input type="checkbox" id="selectAllOrders" onchange="toggleSelectAllOrders()"></th>
+                                        <th>رقم الطلب</th>
+                                        <th>العميل</th>
+                                        <th>التاريخ</th>
+                                        <th>الكمية</th>
+                                        <th>المبلغ</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${ordersWithService.map(order => {
+                                        const serviceItem = order.items.find(i => i.name === serviceName);
+                                        const itemTotal = (serviceItem.customPrice !== undefined ? serviceItem.customPrice : serviceItem.price) * serviceItem.quantity;
+                                        return `
+                                            <tr>
+                                                <td><input type="checkbox" class="order-checkbox" value="${order.id}"></td>
+                                                <td>#${order.id}</td>
+                                                <td>${order.customerName}</td>
+                                                <td>${formatDate(order.date)}</td>
+                                                <td>${serviceItem.quantity}</td>
+                                                <td>${formatNumber(itemTotal)} جنيه</td>
+                                            </tr>
+                                        `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div style="display: flex; gap: 10px; margin-top: 20px;">
+                            <button class="btn btn-danger" onclick="deleteSelectedServiceRevenue('${serviceName}')"><i class="fas fa-trash"></i> حذف المحدد</button>
+                            <button class="btn btn-secondary" onclick="closeModal('deleteServiceRevenueModal')"><i class="fas fa-times"></i> إلغاء</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', html);
+        }
+
+        function toggleSelectAllOrders() {
+            const selectAll = document.getElementById('selectAllOrders').checked;
+            document.querySelectorAll('.order-checkbox').forEach(cb => cb.checked = selectAll);
+        }
+
+        function deleteSelectedServiceRevenue(serviceName) {
+            const selectedIds = Array.from(document.querySelectorAll('.order-checkbox:checked')).map(cb => parseInt(cb.value));
+            if (selectedIds.length === 0) {
+                showAlert('يرجى اختيار طلب واحد على الأقل', 'error');
+                return;
+            }
+            if (!confirm(`هل أنت متأكد من حذف ${selectedIds.length} طلب؟`)) return;
+
+            let mockOrders = JSON.parse(localStorage.getItem('mockOrders') || '[]');
+            mockOrders = mockOrders.filter(o => !selectedIds.includes(o.id));
+            localStorage.setItem('mockOrders', JSON.stringify(mockOrders));
+
+            // حذف من Google Sheets أيضاً
+            selectedIds.forEach(id => apiCall('deleteOrder', { id }));
+
+            closeModal('deleteServiceRevenueModal');
+            showAlert(`تم حذف ${selectedIds.length} طلب بنجاح`, 'success');
+            loadServicesReport();
+            loadDashboard();
         }
 
         // ============ Settings ============
