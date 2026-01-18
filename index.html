@@ -542,19 +542,14 @@
 
     <script>
         // ============ Configuration ============
-        const DEFAULT_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwD0qWytxCzKJ6W_4sqCnL6nAexo58_BGTx_3x_-GSyteSmf-zeu2Si05XFp_h1wlr6/exec';
+        const DEFAULT_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzM34CDT69aivxgtd44MwovlLXJCK-kGyOu2lehsxXce642_KQaKfy2H9ayWUyNAHr7/exec';
         // Force update: Clear old URL and use new one
         localStorage.setItem('webAppUrl', DEFAULT_WEB_APP_URL);
         let WEB_APP_URL = DEFAULT_WEB_APP_URL;
         let currentUser = null;
 
-        const defaultUsers = [
-            { id: 1, username: 'admin', password: 'admin123', fullName: 'المدير', role: 'admin' },
-            { id: 2, username: 'accountant', password: 'acc123', fullName: 'المحاسب', role: 'accountant' },
-            { id: 3, username: 'وليد', password: '123456789', fullName: 'وليد عبدالوهاب', role: 'accountant' }
-        ];
-        // Force sync users with correct passwords
-        localStorage.setItem('users', JSON.stringify(defaultUsers));
+        // المستخدمون الآن من Google Sheets فقط
+        // شيت Users: رقم المستخدم | اسم المستخدم | كلمة المرور | الاسم الكامل | الصلاحية
 
         const defaultServices = [
             { id: 1, name: 'طباعة أبيض وأسود', price: 5, icon: 'fa-print', hasDiscount: true, discountQty: 100, discountPercent: 10, hasCommission: true, commissionPercent: 5 },
@@ -619,7 +614,6 @@
             return { employees, total: totalCommission };
         }
 
-        let users = JSON.parse(localStorage.getItem('users')) || defaultUsers;
         let services = JSON.parse(localStorage.getItem('services')) || defaultServices;
         let employees = JSON.parse(localStorage.getItem('employees')) || ['أحمد', 'محمد', 'عبدالله'];
         let fixedExpenses = JSON.parse(localStorage.getItem('fixedExpenses')) || [];
@@ -631,35 +625,40 @@
             const username = document.getElementById('loginUsername').value.trim();
             const password = document.getElementById('loginPassword').value;
             const loginBtn = document.querySelector('.login-box .btn-primary');
+            const loginError = document.getElementById('loginError');
             const originalText = loginBtn.innerHTML;
 
             // Show loading
             loginBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري التحقق...';
             loginBtn.disabled = true;
+            loginError.style.display = 'none';
 
             try {
-                // Try to login from Google Sheets first
-                const response = await apiCall('login', { username, password });
-                if (response && response.success && response.user) {
-                    currentUser = response.user;
-                    localStorage.setItem('currentUser', JSON.stringify(response.user));
-                    document.getElementById('loginError').style.display = 'none';
+                // Login from Google Sheets using GET request
+                const url = new URL(WEB_APP_URL);
+                url.searchParams.append('action', 'login');
+                url.searchParams.append('username', username);
+                url.searchParams.append('password', password);
+
+                console.log('Attempting login for:', username);
+                const response = await fetch(url.toString());
+                const result = await response.json();
+                console.log('Login response:', result);
+
+                if (result && result.success && result.user) {
+                    currentUser = result.user;
+                    localStorage.setItem('currentUser', JSON.stringify(result.user));
                     showMainApp();
+                    loginBtn.innerHTML = originalText;
+                    loginBtn.disabled = false;
                     return;
+                } else {
+                    console.log('Login failed:', result.error, result.debug);
+                    loginError.style.display = 'flex';
                 }
             } catch (error) {
-                console.log('Cloud login failed, trying local:', error);
-            }
-
-            // Fallback to local users
-            const user = users.find(u => u.username === username && u.password === password);
-            if (user) {
-                currentUser = user;
-                localStorage.setItem('currentUser', JSON.stringify(user));
-                document.getElementById('loginError').style.display = 'none';
-                showMainApp();
-            } else {
-                document.getElementById('loginError').style.display = 'flex';
+                console.error('Login error:', error);
+                loginError.style.display = 'flex';
             }
 
             // Reset button
