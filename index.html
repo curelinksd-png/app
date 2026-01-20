@@ -99,6 +99,8 @@
         .role-accountant { background: rgba(255,170,0,0.3); color: #ffaa00; }
         .admin-only { display: block; }
         body.accountant-mode .admin-only { display: none !important; }
+        .accountant-only { display: none; }
+        body.accountant-mode .accountant-only { display: block !important; }
         .expense-card { background: rgba(255,170,0,0.1); border: 1px solid rgba(255,170,0,0.3); }
     </style>
 </head>
@@ -197,10 +199,20 @@
                         <div class="stat-value" id="todayOrders">0</div>
                         <div class="stat-label">طلبات اليوم</div>
                     </div>
+                    <div class="stat-card accountant-only" style="border-color: rgba(0,212,255,0.3);">
+                        <i class="fas fa-cash-register stat-icon" style="color: #00d4ff;"></i>
+                        <div class="stat-value" id="accountantTodaySales" style="color: #00d4ff;">0</div>
+                        <div class="stat-label">إجمالي مبيعات اليوم (جنيه)</div>
+                    </div>
                     <div class="stat-card" style="border-color: rgba(255,170,0,0.3);">
                         <i class="fas fa-wallet stat-icon" style="color: #ffaa00;"></i>
                         <div class="stat-value" id="todayExpenses" style="color: #ffaa00;">0</div>
                         <div class="stat-label">مصروفات اليوم (جنيه)</div>
+                    </div>
+                    <div class="stat-card accountant-only" style="border-color: rgba(0,255,136,0.3);">
+                        <i class="fas fa-piggy-bank stat-icon" style="color: #00ff88;"></i>
+                        <div class="stat-value" id="amountToDeposit" style="color: #00ff88;">0</div>
+                        <div class="stat-label">المطلوب توريده (جنيه)</div>
                     </div>
                     <div class="stat-card admin-only">
                         <i class="fas fa-calendar-alt stat-icon"></i>
@@ -209,7 +221,17 @@
                     </div>
                 </div>
                 <div class="card">
-                    <h3 class="card-title"><i class="fas fa-clock"></i> آخر الطلبات</h3>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+                        <h3 class="card-title" style="margin: 0;"><i class="fas fa-clock"></i> آخر الطلبات</h3>
+                        <div class="admin-only" style="display: flex; gap: 10px; align-items: center;">
+                            <select id="dashboardFilterType" onchange="updateDashboardFilter()" style="padding: 10px; border-radius: 10px; background: #16213e; color: #fff; border: 1px solid #0f3460;">
+                                <option value="today">طلبات اليوم</option>
+                                <option value="day">تحديد يوم</option>
+                                <option value="all">عرض الكل</option>
+                            </select>
+                            <input type="date" id="dashboardFilterDate" onchange="loadDashboard()" style="padding: 10px; border-radius: 10px; background: #16213e; color: #fff; border: 1px solid #0f3460; display: none;">
+                        </div>
+                    </div>
                     <div class="table-container">
                         <table>
                             <thead><tr><th>رقم الطلب</th><th>العميل</th><th>الخدمة</th><th class="admin-only">المبلغ</th><th>التاريخ</th><th>الحالة</th><th class="admin-only">إجراء</th></tr></thead>
@@ -625,10 +647,28 @@
             orders.forEach(order => {
                 if (!order.items) return;
                 const empName = order.employeeName || 'غير محدد';
+
+                // حساب إجمالي الفاتورة قبل الخصم الإضافي لتوزيع الخصم بالتناسب
+                let orderSubtotal = 0;
+                order.items.forEach(item => {
+                    let itemGross = item.price * item.quantity;
+                    let itemNet = itemGross;
+                    if (item.customPrice !== undefined && item.customPrice < item.price) {
+                        itemNet = item.customPrice * item.quantity;
+                    } else if (item.hasDiscount && item.quantity >= item.discountQty) {
+                        itemNet = itemGross - (itemGross * (item.discountPercent / 100));
+                    }
+                    orderSubtotal += itemNet;
+                });
+
+                // نسبة الخصم الإضافي من الفاتورة
+                const orderDiscountAmount = order.discountAmount || 0;
+                const discountRatio = orderSubtotal > 0 ? orderDiscountAmount / orderSubtotal : 0;
+
                 order.items.forEach(item => {
                     const service = services.find(s => s.name === item.name);
                     if (service && service.hasCommission && service.commissionPercent > 0) {
-                        // حساب الصافي بعد الخصم
+                        // حساب الصافي بعد خصم الكمية/السعر المخصص
                         let itemGross = item.price * item.quantity;
                         let itemNet = itemGross;
                         // خصم يدوي
@@ -639,8 +679,13 @@
                         else if (item.hasDiscount && item.quantity >= item.discountQty) {
                             itemNet = itemGross - (itemGross * (item.discountPercent / 100));
                         }
-                        // حساب العمولة من الصافي
-                        const commission = itemNet * (service.commissionPercent / 100);
+
+                        // توزيع خصم الفاتورة الإضافي على هذه الخدمة بالتناسب
+                        const itemDiscountFromOrder = itemNet * discountRatio;
+                        const finalItemNet = itemNet - itemDiscountFromOrder;
+
+                        // حساب العمولة من الصافي النهائي (بعد كل الخصومات)
+                        const commission = finalItemNet * (service.commissionPercent / 100);
                         if (!employeeCommissions[empName]) {
                             employeeCommissions[empName] = { name: empName, services: {}, totalCommission: 0 };
                         }
@@ -648,7 +693,7 @@
                             employeeCommissions[empName].services[item.name] = { name: item.name, count: 0, revenue: 0, commission: 0, commissionPercent: service.commissionPercent };
                         }
                         employeeCommissions[empName].services[item.name].count += item.quantity;
-                        employeeCommissions[empName].services[item.name].revenue += itemNet;
+                        employeeCommissions[empName].services[item.name].revenue += finalItemNet;
                         employeeCommissions[empName].services[item.name].commission += commission;
                         employeeCommissions[empName].totalCommission += commission;
                         totalCommission += commission;
@@ -921,6 +966,21 @@
         function getSectionName(id) { const names = { dashboard: 'الرئيسية', newOrder: 'طلب جديد', orders: 'الطلبات', customers: 'العملاء', inventory: 'المخزون', reports: 'التقارير', settings: 'الإعدادات', expenses: 'المصروفات', deposits: 'الإيداعات' }; return names[id] || ''; }
 
         // ============ Dashboard ============
+        function updateDashboardFilter() {
+            const filterType = document.getElementById('dashboardFilterType').value;
+            const dateInput = document.getElementById('dashboardFilterDate');
+
+            if (filterType === 'day') {
+                dateInput.style.display = 'block';
+                if (!dateInput.value) {
+                    dateInput.value = new Date().toISOString().split('T')[0];
+                }
+            } else {
+                dateInput.style.display = 'none';
+            }
+            loadDashboard();
+        }
+
         async function loadDashboard() {
             const data = await apiGet('getDashboard');
             if (data) {
@@ -950,12 +1010,45 @@
                     document.getElementById('todayDiscount').textContent = formatNumber(todayDiscount);
                     document.getElementById('todayNetSales').textContent = formatNumber(todayNet);
                     document.getElementById('monthSales').textContent = formatNumber(data.monthSales || 0);
+                } else {
+                    // للمحاسب: عرض إجمالي المبيعات والمطلوب توريده
+                    document.getElementById('accountantTodaySales').textContent = formatNumber(todayNet);
+                    const todayExpensesAmount = data.todayExpenses || 0;
+                    const amountToDeposit = todayNet - todayExpensesAmount;
+                    document.getElementById('amountToDeposit').textContent = formatNumber(amountToDeposit);
                 }
                 document.getElementById('todayOrders').textContent = data.todayOrders || 0;
                 document.getElementById('todayExpenses').textContent = formatNumber(data.todayExpenses || 0);
+
+                // استخدام الطلبات من localStorage لضمان عرض الكل
+                const allOrders = JSON.parse(localStorage.getItem('mockOrders') || '[]');
+                // تحويل الطلبات لصيغة العرض
+                let ordersToShow = allOrders.map(order => ({
+                    id: order.id,
+                    customerName: order.customerName,
+                    services: order.items ? order.items.map(i => `${i.name}(${i.quantity})`).join(', ') : order.services || '',
+                    total: order.total || 0,
+                    date: order.date,
+                    status: order.status || 'مكتمل'
+                })).sort((a, b) => new Date(b.date) - new Date(a.date));
+                if (isAdmin()) {
+                    const filterType = document.getElementById('dashboardFilterType').value;
+                    const filterDate = document.getElementById('dashboardFilterDate').value;
+
+                    if (filterType === 'today') {
+                        ordersToShow = ordersToShow.filter(o => o.date && o.date.split('T')[0] === today);
+                    } else if (filterType === 'day' && filterDate) {
+                        ordersToShow = ordersToShow.filter(o => o.date && o.date.split('T')[0] === filterDate);
+                    }
+                    // filterType === 'all' يعرض كل الطلبات
+                } else {
+                    // المحاسب يرى طلبات اليوم فقط
+                    ordersToShow = ordersToShow.filter(o => o.date && o.date.split('T')[0] === today);
+                }
+
                 const tbody = document.getElementById('recentOrdersTable');
-                if (data.recentOrders && data.recentOrders.length > 0) {
-                    tbody.innerHTML = data.recentOrders.map(order => `<tr><td>#${order.id}</td><td>${order.customerName}</td><td>${order.services}</td>${isAdmin() ? `<td>${formatNumber(order.total)} جنيه</td>` : ''}<td>${formatDate(order.date)}</td><td><span style="color: ${order.status === 'مكتمل' ? '#00ff88' : '#ffaa00'}">${order.status}</span></td>${isAdmin() ? `<td><button class="btn btn-danger" style="padding: 5px 10px;" onclick="deleteDashboardOrder(${order.id})"><i class="fas fa-trash"></i></button></td>` : ''}</tr>`).join('');
+                if (ordersToShow.length > 0) {
+                    tbody.innerHTML = ordersToShow.map(order => `<tr><td>#${order.id}</td><td>${order.customerName}</td><td>${order.services}</td>${isAdmin() ? `<td>${formatNumber(order.total)} جنيه</td>` : ''}<td>${formatDate(order.date)}</td><td><span style="color: ${order.status === 'مكتمل' ? '#00ff88' : '#ffaa00'}">${order.status}</span></td>${isAdmin() ? `<td><button class="btn btn-danger" style="padding: 5px 10px;" onclick="deleteDashboardOrder(${order.id})"><i class="fas fa-trash"></i></button></td>` : ''}</tr>`).join('');
                 } else { tbody.innerHTML = `<tr><td colspan="${isAdmin() ? 7 : 5}" style="text-align: center;">لا توجد طلبات</td></tr>`; }
                 const alertsDiv = document.getElementById('inventoryAlerts');
                 if (data.lowInventory && data.lowInventory.length > 0) { alertsDiv.innerHTML = data.lowInventory.map(item => `<div class="alert alert-error"><i class="fas fa-exclamation-triangle"></i><span>${item.name}: الكمية المتبقية ${item.quantity} ${item.unit}</span></div>`).join(''); }
@@ -1559,19 +1652,49 @@
             const mockOrders = JSON.parse(localStorage.getItem('mockOrders') || '[]');
             const serviceStats = {};
             mockOrders.forEach(order => {
+                if (!order.items) return;
+
+                // حساب إجمالي الفاتورة قبل الخصم الإضافي لتوزيع الخصم بالتناسب
+                let orderSubtotal = 0;
+                order.items.forEach(item => {
+                    let itemGross = item.price * item.quantity;
+                    let itemNet = itemGross;
+                    if (item.customPrice !== undefined && item.customPrice < item.price) {
+                        itemNet = item.customPrice * item.quantity;
+                    } else if (item.hasDiscount && item.quantity >= item.discountQty) {
+                        itemNet = itemGross - (itemGross * (item.discountPercent / 100));
+                    }
+                    orderSubtotal += itemNet;
+                });
+
+                // نسبة الخصم الإضافي من الفاتورة
+                const orderDiscountAmount = order.discountAmount || 0;
+                const discountRatio = orderSubtotal > 0 ? orderDiscountAmount / orderSubtotal : 0;
+
                 order.items.forEach(item => {
                     if (!serviceStats[item.name]) serviceStats[item.name] = { count: 0, grossRevenue: 0, discount: 0, netRevenue: 0 };
                     serviceStats[item.name].count += item.quantity;
                     const grossTotal = item.price * item.quantity;
                     serviceStats[item.name].grossRevenue += grossTotal;
-                    let discountAmount = 0;
+
+                    // حساب خصم الكمية أو السعر المخصص
+                    let itemDiscount = 0;
+                    let itemNetBeforeOrderDiscount = grossTotal;
                     if (item.customPrice !== undefined && item.customPrice < item.price) {
-                        discountAmount = (item.price - item.customPrice) * item.quantity;
+                        itemDiscount = (item.price - item.customPrice) * item.quantity;
+                        itemNetBeforeOrderDiscount = item.customPrice * item.quantity;
                     } else if (item.hasDiscount && item.quantity >= item.discountQty) {
-                        discountAmount = grossTotal * (item.discountPercent / 100);
+                        itemDiscount = grossTotal * (item.discountPercent / 100);
+                        itemNetBeforeOrderDiscount = grossTotal - itemDiscount;
                     }
-                    serviceStats[item.name].discount += discountAmount;
-                    serviceStats[item.name].netRevenue += (grossTotal - discountAmount);
+
+                    // توزيع خصم الفاتورة الإضافي على هذه الخدمة بالتناسب
+                    const itemDiscountFromOrder = itemNetBeforeOrderDiscount * discountRatio;
+                    const totalItemDiscount = itemDiscount + itemDiscountFromOrder;
+                    const finalItemNet = grossTotal - totalItemDiscount;
+
+                    serviceStats[item.name].discount += totalItemDiscount;
+                    serviceStats[item.name].netRevenue += finalItemNet;
                 });
             });
             const sortedServices = Object.entries(serviceStats).sort((a, b) => b[1].netRevenue - a[1].netRevenue);
