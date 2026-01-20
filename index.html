@@ -136,6 +136,7 @@
                 <button class="nav-btn" onclick="showSection('newOrder')"><i class="fas fa-plus"></i> طلب جديد</button>
                 <button class="nav-btn" onclick="showSection('orders')"><i class="fas fa-list"></i> الطلبات</button>
                 <button class="nav-btn" onclick="showSection('expenses')"><i class="fas fa-wallet"></i> المصروفات</button>
+                <button class="nav-btn admin-only" onclick="showSection('deposits')"><i class="fas fa-piggy-bank"></i> الإيداعات</button>
                 <button class="nav-btn" onclick="showSection('customers')"><i class="fas fa-users"></i> العملاء</button>
                 <button class="nav-btn" onclick="showSection('inventory')"><i class="fas fa-boxes"></i> المخزون</button>
                 <button class="nav-btn admin-only" onclick="showSection('reports')"><i class="fas fa-chart-bar"></i> التقارير</button>
@@ -256,7 +257,7 @@
                                 <label>طريقة الدفع</label>
                                 <select id="paymentMethod">
                                     <option value="نقدي">نقدي</option>
-                                    <option value="بنكي">بنكي (تحويل)</option>
+                                    <option value="بنكك">بنكك (تحويل)</option>
                                 </select>
                             </div>
                             <div class="form-group">
@@ -313,6 +314,37 @@
                         <table>
                             <thead><tr><th>التاريخ</th><th>الوصف</th><th>الفئة</th><th>المبلغ</th><th>بواسطة</th><th>إجراءات</th></tr></thead>
                             <tbody id="expensesTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Deposits -->
+            <div id="deposits" class="section">
+                <div class="card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+                        <h3 class="card-title" style="margin: 0;"><i class="fas fa-piggy-bank"></i> الإيداعات البنكية</h3>
+                        <button class="btn btn-primary" onclick="showAddDepositModal()"><i class="fas fa-plus"></i> إضافة إيداع</button>
+                    </div>
+                    <!-- فلتر التاريخ -->
+                    <div style="display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; align-items: center;">
+                        <select id="depositFilterType" onchange="updateDepositFilter()" style="padding: 10px; border-radius: 10px; background: #16213e; color: #fff; border: 1px solid #0f3460;">
+                            <option value="day">تصفية باليوم</option>
+                            <option value="month">تصفية بالشهر</option>
+                            <option value="all">عرض الكل</option>
+                        </select>
+                        <input type="date" id="depositFilterDate" onchange="loadDeposits()" style="padding: 10px; border-radius: 10px; background: #16213e; color: #fff; border: 1px solid #0f3460;">
+                        <input type="month" id="depositFilterMonth" onchange="loadDeposits()" style="padding: 10px; border-radius: 10px; background: #16213e; color: #fff; border: 1px solid #0f3460; display: none;">
+                    </div>
+                    <div class="stats-grid" style="margin-bottom: 20px;">
+                        <div class="stat-card"><i class="fas fa-filter stat-icon" style="color: #00d4ff;"></i><div class="stat-value" style="color: #00d4ff;" id="filteredDeposits">0.00</div><div class="stat-label">المبلغ المحدد</div></div>
+                        <div class="stat-card"><i class="fas fa-calendar-alt stat-icon" style="color: #00ff88;"></i><div class="stat-value" style="color: #00ff88;" id="monthDeposits">0.00</div><div class="stat-label">إيداعات الشهر</div></div>
+                        <div class="stat-card"><i class="fas fa-coins stat-icon" style="color: #ffaa00;"></i><div class="stat-value" style="color: #ffaa00;" id="totalDeposits">0.00</div><div class="stat-label">إجمالي الإيداعات</div></div>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead><tr><th>التاريخ</th><th>المبلغ</th><th>البنك/الحساب</th><th>الوصف</th><th>بواسطة</th><th>إجراءات</th></tr></thead>
+                            <tbody id="depositsTable"></tbody>
                         </table>
                     </div>
                 </div>
@@ -458,6 +490,24 @@
         </div>
     </div>
 
+    <div id="addDepositModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header"><h3><i class="fas fa-piggy-bank"></i> إضافة إيداع جديد</h3><button class="modal-close" onclick="closeModal('addDepositModal')">&times;</button></div>
+            <div class="form-group"><label>تاريخ الإيداع *</label><input type="date" id="modalDepositDate" required></div>
+            <div class="form-group"><label>المبلغ (جنيه) *</label><input type="number" id="modalDepositAmount" step="0.5" required></div>
+            <div class="form-group"><label>البنك/الحساب *</label>
+                <select id="modalDepositBank">
+                    <option value="بنكك">بنكك</option>
+                    <option value="بنك الخرطوم">بنك الخرطوم</option>
+                    <option value="بنك فيصل">بنك فيصل</option>
+                    <option value="أخرى">أخرى</option>
+                </select>
+            </div>
+            <div class="form-group"><label>وصف/ملاحظات</label><input type="text" id="modalDepositDesc" placeholder="مثال: إيداع مبيعات الأسبوع"></div>
+            <button class="btn btn-primary" onclick="addDeposit()"><i class="fas fa-save"></i> حفظ الإيداع</button>
+        </div>
+    </div>
+
     <div id="addCustomerModal" class="modal">
         <div class="modal-content">
             <div class="modal-header"><h3><i class="fas fa-user-plus"></i> إضافة عميل جديد</h3><button class="modal-close" onclick="closeModal('addCustomerModal')">&times;</button></div>
@@ -542,7 +592,7 @@
 
     <script>
         // ============ Configuration ============
-        const DEFAULT_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzM34CDT69aivxgtd44MwovlLXJCK-kGyOu2lehsxXce642_KQaKfy2H9ayWUyNAHr7/exec';
+        const DEFAULT_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzoXrcZwh6Z1nMAgZSH4f3RXrWchkFBL3fNz4UFRwFVp4h5SNqy0zfZF3jIc8o-H-xF/exec';
         // Force update: Clear old URL and use new one
         localStorage.setItem('webAppUrl', DEFAULT_WEB_APP_URL);
         let WEB_APP_URL = DEFAULT_WEB_APP_URL;
@@ -852,7 +902,7 @@
 
         // ============ Navigation ============
         function showSection(sectionId) {
-            if ((sectionId === 'reports' || sectionId === 'settings') && !isAdmin()) { showAlert('ليس لديك صلاحية للوصول لهذا القسم', 'error'); return; }
+            if ((sectionId === 'reports' || sectionId === 'settings' || sectionId === 'deposits') && !isAdmin()) { showAlert('ليس لديك صلاحية للوصول لهذا القسم', 'error'); return; }
             document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
             document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
             const section = document.getElementById(sectionId);
@@ -863,11 +913,12 @@
             else if (sectionId === 'customers') loadCustomers();
             else if (sectionId === 'inventory') loadInventory();
             else if (sectionId === 'expenses') loadExpenses();
+            else if (sectionId === 'deposits') { initDepositFilter(); loadDeposits(); }
             else if (sectionId === 'reports') loadDailyReport();
             else if (sectionId === 'newOrder') { renderServices(); loadCustomersDropdown(); }
         }
 
-        function getSectionName(id) { const names = { dashboard: 'الرئيسية', newOrder: 'طلب جديد', orders: 'الطلبات', customers: 'العملاء', inventory: 'المخزون', reports: 'التقارير', settings: 'الإعدادات', expenses: 'المصروفات' }; return names[id] || ''; }
+        function getSectionName(id) { const names = { dashboard: 'الرئيسية', newOrder: 'طلب جديد', orders: 'الطلبات', customers: 'العملاء', inventory: 'المخزون', reports: 'التقارير', settings: 'الإعدادات', expenses: 'المصروفات', deposits: 'الإيداعات' }; return names[id] || ''; }
 
         // ============ Dashboard ============
         async function loadDashboard() {
@@ -1127,9 +1178,157 @@
             const data = await apiGet('getOrders');
             const tbody = document.getElementById('ordersTable');
             if (data && data.orders && data.orders.length > 0) {
-                tbody.innerHTML = data.orders.map(order => `<tr><td>#${order.id}</td><td>${order.customerName}</td><td>${order.services}</td><td>${order.subtotal.toFixed(2)} جنيه</td><td>${(order.discountAmount || 0).toFixed(2)} جنيه</td><td>${order.total.toFixed(2)} جنيه</td><td><span style="color: ${order.paymentMethod === 'بنكي' ? '#00d4ff' : '#00ff88'}">${order.paymentMethod || 'نقدي'}</span></td><td>${formatDate(order.date)}</td><td><span style="color: ${order.status === 'مكتمل' ? '#00ff88' : '#ffaa00'}">${order.status}</span></td><td><button class="btn btn-secondary" style="padding: 5px 10px; font-size: 0.8rem;" onclick='showInvoice(${JSON.stringify(order)})'><i class="fas fa-print"></i></button></td></tr>`).join('');
+                tbody.innerHTML = data.orders.map(order => `<tr><td>#${order.id}</td><td>${order.customerName}</td><td>${order.services}</td><td>${order.subtotal.toFixed(2)} جنيه</td><td>${(order.discountAmount || 0).toFixed(2)} جنيه</td><td>${order.total.toFixed(2)} جنيه</td><td><span style="color: ${order.paymentMethod === 'بنكك' ? '#00d4ff' : '#00ff88'}">${order.paymentMethod || 'نقدي'}</span></td><td>${formatDate(order.date)}</td><td><span style="color: ${order.status === 'مكتمل' ? '#00ff88' : '#ffaa00'}">${order.status}</span></td><td><button class="btn btn-secondary" style="padding: 5px 10px; font-size: 0.8rem;" onclick='showInvoice(${JSON.stringify(order)})'><i class="fas fa-print"></i></button></td></tr>`).join('');
             }
             else { tbody.innerHTML = '<tr><td colspan="10" style="text-align: center;">لا توجد طلبات</td></tr>'; }
+        }
+
+        // ============ Deposits ============
+        let deposits = JSON.parse(localStorage.getItem('deposits')) || [];
+
+        function initDepositFilter() {
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('depositFilterDate').value = today;
+            document.getElementById('depositFilterMonth').value = today.substring(0, 7);
+            document.getElementById('depositFilterType').value = 'all';
+            document.getElementById('depositFilterDate').style.display = 'none';
+            document.getElementById('depositFilterMonth').style.display = 'none';
+        }
+
+        function updateDepositFilter() {
+            const filterType = document.getElementById('depositFilterType').value;
+            const dateInput = document.getElementById('depositFilterDate');
+            const monthInput = document.getElementById('depositFilterMonth');
+
+            if (filterType === 'day') {
+                dateInput.style.display = 'block';
+                monthInput.style.display = 'none';
+                if (!dateInput.value) {
+                    dateInput.value = new Date().toISOString().split('T')[0];
+                }
+            } else if (filterType === 'month') {
+                dateInput.style.display = 'none';
+                monthInput.style.display = 'block';
+                if (!monthInput.value) {
+                    monthInput.value = new Date().toISOString().substring(0, 7);
+                }
+            } else {
+                dateInput.style.display = 'none';
+                monthInput.style.display = 'none';
+            }
+            loadDeposits();
+        }
+
+        async function loadDeposits() {
+            const data = await apiGet('getDeposits');
+            if (data && data.deposits) {
+                deposits = data.deposits;
+                localStorage.setItem('deposits', JSON.stringify(deposits));
+            }
+
+            const today = new Date().toISOString().split('T')[0];
+            const thisMonth = today.substring(0, 7);
+
+            // تحديد الفلتر
+            const filterType = document.getElementById('depositFilterType').value;
+            const filterDate = document.getElementById('depositFilterDate').value;
+            const filterMonth = document.getElementById('depositFilterMonth').value;
+
+            let monthTotal = 0, allTotal = 0, filteredTotal = 0;
+            let filteredDeposits = [];
+
+            deposits.forEach(d => {
+                const amount = parseFloat(d.amount) || 0;
+                const depositDate = d.date ? d.date.split('T')[0] : '';
+                const depositMonth = depositDate.substring(0, 7);
+
+                allTotal += amount;
+                if (depositMonth === thisMonth) monthTotal += amount;
+
+                // تطبيق الفلتر
+                let includeInFilter = false;
+                if (filterType === 'all') {
+                    includeInFilter = true;
+                } else if (filterType === 'day' && filterDate) {
+                    includeInFilter = depositDate === filterDate;
+                } else if (filterType === 'month' && filterMonth) {
+                    includeInFilter = depositMonth === filterMonth;
+                } else {
+                    includeInFilter = true;
+                }
+
+                if (includeInFilter) {
+                    filteredTotal += amount;
+                    filteredDeposits.push(d);
+                }
+            });
+
+            document.getElementById('filteredDeposits').textContent = formatNumber(filteredTotal);
+            document.getElementById('monthDeposits').textContent = formatNumber(monthTotal);
+            document.getElementById('totalDeposits').textContent = formatNumber(allTotal);
+
+            const tbody = document.getElementById('depositsTable');
+            if (filteredDeposits.length > 0) {
+                tbody.innerHTML = filteredDeposits.map(d => `<tr>
+                    <td>${formatDate(d.date)}</td>
+                    <td>${formatNumber(parseFloat(d.amount) || 0)} جنيه</td>
+                    <td>${d.bank || '-'}</td>
+                    <td>${d.description || '-'}</td>
+                    <td>${d.createdBy || '-'}</td>
+                    <td>${isAdmin() ? `<button class="btn btn-danger" style="padding: 5px 10px;" onclick="deleteDeposit(${d.id})"><i class="fas fa-trash"></i></button>` : '-'}</td>
+                </tr>`).join('');
+            } else {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">لا توجد إيداعات في هذه الفترة</td></tr>';
+            }
+        }
+
+        function showAddDepositModal() {
+            // ضبط التاريخ على اليوم
+            document.getElementById('modalDepositDate').value = new Date().toISOString().split('T')[0];
+            document.getElementById('modalDepositAmount').value = '';
+            document.getElementById('modalDepositDesc').value = '';
+            document.getElementById('modalDepositBank').value = 'بنكك';
+            document.getElementById('addDepositModal').classList.add('active');
+        }
+
+        async function addDeposit() {
+            const depositDate = document.getElementById('modalDepositDate').value;
+            const amount = parseFloat(document.getElementById('modalDepositAmount').value);
+            const bank = document.getElementById('modalDepositBank').value;
+            const description = document.getElementById('modalDepositDesc').value;
+
+            if (!depositDate) {
+                alert('الرجاء اختيار تاريخ الإيداع');
+                return;
+            }
+
+            if (!amount || amount <= 0) {
+                alert('الرجاء إدخال مبلغ صحيح');
+                return;
+            }
+
+            const deposit = {
+                id: Date.now(),
+                amount,
+                bank,
+                description,
+                date: depositDate + 'T' + new Date().toTimeString().split(' ')[0],
+                createdBy: currentUser.fullName
+            };
+
+            deposits.unshift(deposit);
+            localStorage.setItem('deposits', JSON.stringify(deposits));
+            await apiCall('addDeposit', deposit);
+            closeModal('addDepositModal');
+            loadDeposits();
+        }
+
+        async function deleteDeposit(id) {
+            if (!confirm('هل أنت متأكد من حذف هذا الإيداع؟')) return;
+            deposits = deposits.filter(d => d.id !== id);
+            localStorage.setItem('deposits', JSON.stringify(deposits));
+            await apiCall('deleteDeposit', { id });
+            loadDeposits();
         }
 
         // ============ Customers ============
@@ -1225,7 +1424,7 @@
             const netSales = grossSales - totalDiscount;
 
             const cashSales = dayOrders.filter(o => !o.paymentMethod || o.paymentMethod === 'نقدي').reduce((sum, o) => sum + o.total, 0);
-            const bankSales = dayOrders.filter(o => o.paymentMethod === 'بنكي').reduce((sum, o) => sum + o.total, 0);
+            const bankSales = dayOrders.filter(o => o.paymentMethod === 'بنكك').reduce((sum, o) => sum + o.total, 0);
             const totalExpenses = dayExpenses.reduce((sum, e) => sum + e.amount, 0);
             const netProfit = netSales - totalExpenses;
             const profitColor = netProfit >= 0 ? '#00ff88' : '#ff4757';
@@ -1233,7 +1432,7 @@
             const commissionData = calculateCommission(dayOrders);
             document.getElementById('dailyReportContent').innerHTML = `
                 <div class="stats-grid">
-                    <div class="stat-card"><i class="fas fa-money-bill-wave stat-icon"></i><div class="stat-value">${formatNumber(grossSales)}</div><div class="stat-label">إجمالي المبيعات (جنيه)</div><small style="color: #00ff88;">نقدي: ${formatNumber(cashSales)}</small><br><small style="color: #00d4ff;">بنكي: ${formatNumber(bankSales)}</small></div>
+                    <div class="stat-card"><i class="fas fa-money-bill-wave stat-icon"></i><div class="stat-value">${formatNumber(grossSales)}</div><div class="stat-label">إجمالي المبيعات (جنيه)</div><small style="color: #00ff88;">نقدي: ${formatNumber(cashSales)}</small><br><small style="color: #00d4ff;">بنكك: ${formatNumber(bankSales)}</small></div>
                     <div class="stat-card" style="border-color: rgba(255,170,0,0.3);"><i class="fas fa-tags stat-icon" style="color: #ffaa00;"></i><div class="stat-value" style="color: #ffaa00;">${formatNumber(totalDiscount)}</div><div class="stat-label">إجمالي الخصومات (جنيه)</div></div>
                     <div class="stat-card" style="border-color: rgba(0,255,136,0.3);"><i class="fas fa-hand-holding-usd stat-icon" style="color: #00ff88;"></i><div class="stat-value" style="color: #00ff88;">${formatNumber(netSales)}</div><div class="stat-label">صافي المبيعات (جنيه)</div></div>
                     <div class="stat-card"><i class="fas fa-receipt stat-icon"></i><div class="stat-value">${dayOrders.length}</div><div class="stat-label">عدد الطلبات</div></div>
@@ -1269,7 +1468,7 @@
             const netSales = grossSales - totalDiscount;
 
             const cashOrders = monthOrders.filter(o => !o.paymentMethod || o.paymentMethod === 'نقدي');
-            const bankOrders = monthOrders.filter(o => o.paymentMethod === 'بنكي');
+            const bankOrders = monthOrders.filter(o => o.paymentMethod === 'بنكك');
             const cashSales = cashOrders.reduce((sum, o) => sum + o.total, 0);
             const bankSales = bankOrders.reduce((sum, o) => sum + o.total, 0);
             const dailyExpensesTotal = monthExpenses.reduce((sum, e) => sum + e.amount, 0);
@@ -1285,7 +1484,7 @@
 
             document.getElementById('monthlyReportContent').innerHTML = `
                 <div class="stats-grid">
-                    <div class="stat-card"><i class="fas fa-money-bill-wave stat-icon"></i><div class="stat-value">${formatNumber(grossSales)}</div><div class="stat-label">إجمالي المبيعات (جنيه)</div><small style="color: #00ff88;">نقدي: ${formatNumber(cashSales)}</small><br><small style="color: #00d4ff;">بنكي: ${formatNumber(bankSales)}</small></div>
+                    <div class="stat-card"><i class="fas fa-money-bill-wave stat-icon"></i><div class="stat-value">${formatNumber(grossSales)}</div><div class="stat-label">إجمالي المبيعات (جنيه)</div><small style="color: #00ff88;">نقدي: ${formatNumber(cashSales)}</small><br><small style="color: #00d4ff;">بنكك: ${formatNumber(bankSales)}</small></div>
                     <div class="stat-card" style="border-color: rgba(255,170,0,0.3);"><i class="fas fa-tags stat-icon" style="color: #ffaa00;"></i><div class="stat-value" style="color: #ffaa00;">${formatNumber(totalDiscount)}</div><div class="stat-label">إجمالي الخصومات (جنيه)</div></div>
                     <div class="stat-card" style="border-color: rgba(0,255,136,0.3);"><i class="fas fa-hand-holding-usd stat-icon" style="color: #00ff88;"></i><div class="stat-value" style="color: #00ff88;">${formatNumber(netSales)}</div><div class="stat-label">صافي المبيعات (جنيه)</div></div>
                     <div class="stat-card"><i class="fas fa-receipt stat-icon"></i><div class="stat-value">${monthOrders.length}</div><div class="stat-label">عدد الطلبات</div></div>
